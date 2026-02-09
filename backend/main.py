@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 
 # CHANGE THESE IF NEEDED
-SPARQL_ENDPOINT = "http://localhost:3030/brx/sparql"
-UPDATE_ENDPOINT = "http://localhost:3030/brx/update"
+SPARQL_ENDPOINT = "http://https://subformative-barer-garret.ngrok-free.dev/brx/sparql"
+UPDATE_ENDPOINT = "http://https://subformative-barer-garret.ngrok-free.dev/brx/update"
 NS = "http://www.semanticweb.org/tsong44/brxgen#"
 
 app = FastAPI()
