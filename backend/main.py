@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import requests
+import re
 
 # CHANGE THESE IF NEEDED
-SPARQL_ENDPOINT = "https://subformative-barer-garret.ngrok-free.dev/brx/sparql"
-UPDATE_ENDPOINT = "https://subformative-barer-garret.ngrok-free.dev/brx/update"
+SPARQL_ENDPOINT = "http://localhost:3030/brx/sparql"
+UPDATE_ENDPOINT = "http://localhost:3030/brx/update"
 NS = "http://www.semanticweb.org/tsong44/brxgen#"
 
 app = FastAPI()
@@ -107,6 +108,129 @@ def create_relation(subject: str, predicate: str, obj: str):
     }}
     """
     return sparql_update(q)
+
+
+# ----------------- natural language query -----------------
+
+@app.post("/query")
+def natural_language_query(question: str):
+    """
+    Generic natural language query handler that works for any question
+    """
+    question_lower = question.lower().strip()
+
+    stop_words = {
+        "what", "where", "who", "when", "why", "how", "is", "are", "was", "were",
+        "the", "a", "an", "from", "in", "at", "to", "does", "do", "did", "has", "have",
+        "of", "for", "with", "about", "all", "any", "show", "list", "tell", "me"
+    }
+
+    words = re.findall(r"\b\w+\b", question_lower)
+    entities = [w for w in words if w not in stop_words and len(w) > 1]
+
+    if not entities:
+        return {
+            "sparql_query": "",
+            "results": [],
+            "error": "Could not extract any entities from the question."
+        }
+
+    # -----------------------------
+    # Relationship detection
+    # -----------------------------
+    relationship_keywords = []
+
+    if any(w in question_lower for w in ["teach", "teaches", "teaching", "taught"]):
+        relationship_keywords.append("teach")
+    if any(w in question_lower for w in ["enroll", "enrolled", "taking", "course", "courses"]):
+        relationship_keywords.append("enroll|course")
+    if any(w in question_lower for w in ["work", "works", "job", "office"]):
+        relationship_keywords.append("work|office|employ")
+    if any(w in question_lower for w in ["manage", "manager", "head"]):
+        relationship_keywords.append("manage|head")
+    if any(w in question_lower for w in ["member", "belongs", "part of"]):
+        relationship_keywords.append("member|belong")
+
+    # -----------------------------
+    # Entity filters
+    # -----------------------------
+    entity_filters = " || ".join(
+        [f'CONTAINS(LCASE(STR(?subject)), "{e}")' for e in entities] +
+        [f'CONTAINS(LCASE(STR(?object)), "{e}")' for e in entities]
+    )
+
+    if relationship_keywords:
+        predicate_filter = "FILTER(" + " || ".join(
+            [f'REGEX(LCASE(STR(?predicate)), "{kw}")' for kw in relationship_keywords]
+        ) + ")"
+    else:
+        predicate_filter = ""
+
+    # -----------------------------
+    # SPARQL query (instance-only)
+    # -----------------------------
+    sparql_query = f"""
+    PREFIX : <{NS}>
+    PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    PREFIX owl: <http://www.w3.org/2002/07/owl#>
+
+    SELECT DISTINCT ?subject ?predicate ?object WHERE {{
+        ?subject ?predicate ?object .
+
+        FILTER({entity_filters})
+
+        # Remove schema / ontology triples
+        FILTER(?predicate NOT IN (
+            rdf:type,
+            rdfs:subClassOf,
+            rdfs:subPropertyOf,
+            rdfs:domain,
+            rdfs:range,
+            owl:equivalentClass,
+            owl:equivalentProperty,
+            owl:inverseOf,
+            owl:disjointWith
+        ))
+
+        FILTER(!CONTAINS(STR(?subject), "owl#"))
+        FILTER(!CONTAINS(STR(?object), "owl#"))
+        FILTER(!CONTAINS(STR(?object), "XMLSchema"))
+
+        FILTER(isIRI(?object) || isLiteral(?object))
+
+        {predicate_filter}
+    }}
+    LIMIT 50
+    """
+
+    try:
+        data = sparql_select(sparql_query)
+
+        results = []
+        for binding in data["results"]["bindings"]:
+            row = {k: v["value"] for k, v in binding.items()}
+
+            # Final guard: skip class-like subjects
+            subject_name = row["subject"].split("/")[-1].split("#")[-1]
+            if subject_name[0].isupper() and "_" not in subject_name:
+                if subject_name.lower() not in entities:
+                    continue
+
+            results.append(row)
+
+        return {
+            "sparql_query": sparql_query.strip(),
+            "results": results
+        }
+
+    except Exception as e:
+        return {
+            "sparql_query": sparql_query.strip(),
+            "results": [],
+            "error": str(e)
+        }
+
 
 # ----------------- graph -----------------
 
