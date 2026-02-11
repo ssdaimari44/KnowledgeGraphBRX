@@ -4,8 +4,8 @@ import requests
 import re
 
 # CHANGE THESE IF NEEDED
-SPARQL_ENDPOINT = "http://localhost:3030/brx/sparql"
-UPDATE_ENDPOINT = "http://localhost:3030/brx/update"
+SPARQL_ENDPOINT = "https://abcd-1234.ngrok-free.app/brx/sparql"
+UPDATE_ENDPOINT = "https://abcd-1234.ngrok-free.app/brx/update"
 NS = "http://www.semanticweb.org/tsong44/brxgen#"
 
 app = FastAPI()
